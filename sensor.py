@@ -1,6 +1,4 @@
-"""
-Platforma Sensor pentru Rețele Electrice România.
-"""
+"""Sensor platform for the Retele Electrice Romania integration."""
 
 import logging
 from dataclasses import dataclass
@@ -32,7 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class PodContext:
-    """Context pentru un POD (partajat între senzori)."""
+    """Shared context for a single POD across sensor entities."""
 
     pod_name: str
     pod_data: dict
@@ -43,6 +41,7 @@ class PodContext:
 
 
 def _get_readings_from_coordinator(data: dict, pod_name: str) -> list:
+    """Return XML_Readings list for a POD from coordinator data."""
     if not data:
         return []
     archive = data.get("reading_archive", {}).get(pod_name)
@@ -52,6 +51,7 @@ def _get_readings_from_coordinator(data: dict, pod_name: str) -> list:
 
 
 def _extract_years_from_readings(readings: list[dict]) -> list[int]:
+    """Return up to the two most recent reading years in descending order."""
     years: set[int] = set()
     for r in readings:
         date_str = r.get("measureDate", "")
@@ -64,6 +64,7 @@ def _extract_years_from_readings(readings: list[dict]) -> list[int]:
 
 
 def _filter_readings_by_year(readings: list[dict], year: int) -> list[dict]:
+    """Filter readings matching a specific calendar year."""
     result: list[dict] = []
     for r in readings:
         date_str = r.get("measureDate", "")
@@ -77,6 +78,7 @@ def _filter_readings_by_year(readings: list[dict], year: int) -> list[dict]:
 
 
 def _get_energy_value(meters: list[dict], energy_type: str) -> float | None:
+    """Extract numeric meter reading value for a given energy type (e.g. EA, EAP)."""
     for m in meters:
         if m.get("typeofenergy_measured") == energy_type:
             return safe_float(m.get("Value"), None)
@@ -84,6 +86,7 @@ def _get_energy_value(meters: list[dict], energy_type: str) -> float | None:
 
 
 def _format_reading_date(date_str: str) -> str:
+    """Format a reading date string for display."""
     return format_date_ro_ddmmyyyy(date_str)
 
 
@@ -92,7 +95,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Configurează senzorii pe baza POD-urilor descoperite."""
+    """Set up sensor entities for all discovered PODs."""
     coordinator: ReteleElectriceCoordinator = config_entry.runtime_data
 
     if not coordinator.data:
@@ -142,6 +145,7 @@ async def async_setup_entry(
         if is_prosumer:
             entities.append(IndexCitireProductieSensor(coordinator, config_entry, ctx))
 
+        # Create up to two recent annual archive sensors per energy direction
         readings = _get_readings_from_coordinator(coordinator.data, pod_name)
         years = _extract_years_from_readings(readings)
         for year in years:
@@ -170,7 +174,7 @@ async def async_setup_entry(
 class ReteleElectriceSensorBase(
     CoordinatorEntity[ReteleElectriceCoordinator], SensorEntity
 ):
-    """Clasa de bază pentru toți senzorii Rețele Electrice."""
+    """Base class for all Retele Electrice sensor entities."""
 
     _attr_has_entity_name = False
     _attr_attribution = ATTRIBUTION
@@ -184,6 +188,7 @@ class ReteleElectriceSensorBase(
         sensor_name: str,
         icon: str = "mdi:flash",
     ) -> None:
+        """Initialize base sensor metadata and entity ID."""
         super().__init__(coordinator)
         self._config_entry = config_entry
         self._ctx = ctx
@@ -196,24 +201,28 @@ class ReteleElectriceSensorBase(
 
     @property
     def entity_id(self) -> str | None:
+        """Return the custom entity ID."""
         return self._custom_entity_id
 
     @entity_id.setter
     def entity_id(self, value: str) -> None:
+        """Set the custom entity ID."""
         self._custom_entity_id = value
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return device registry info grouped by POD."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._ctx.pod_name)},
-            name=f"Rețele Electrice {self._ctx.pod_name}",
-            manufacturer="Rețele Electrice România",
-            model="Rețele Electrice România",
+            name=f"Retele Electrice {self._ctx.pod_name}",
+            manufacturer="Retele Electrice Romania",
+            model="Retele Electrice Romania",
             entry_type=DeviceEntryType.SERVICE,
         )
 
     @property
     def available(self) -> bool:
+        """Return True when the coordinator has valid data."""
         return (
             self.coordinator.last_update_success
             and self.coordinator.data is not None
@@ -221,6 +230,8 @@ class ReteleElectriceSensorBase(
 
 
 class InformatiiPodSensor(ReteleElectriceSensorBase):
+    """Sensor exposing POD contract and technical attributes."""
+
     def __init__(self, coordinator, config_entry, ctx: PodContext) -> None:
         super().__init__(
             coordinator,
@@ -241,31 +252,31 @@ class InformatiiPodSensor(ReteleElectriceSensorBase):
         pod = self._ctx.pod_data
         return {
             "POD": self._ctx.pod_name,
-            "Adresă": self._ctx.address,
+            "Adresa": self._ctx.address,
             "Tip contract": normalize_title(pod.get("Contract_Type__c", "")),
             "Stare contract": normalize_title(pod.get("Contract_State__c", "")),
             "Tip consumator": normalize_title(pod.get("Consumer_Type_Account__c", "")),
-            "Piață": normalize_title(pod.get("Market_Type__c", "")),
-            "Putere absorbită (kW)": pod.get("Absorbed_Power_KW__c", ""),
-            "Putere absorbită (kVA)": pod.get("Absorbed_Power_KVA__c", ""),
-            "Putere cedată (kW)": pod.get("Released_Power_KW__c", ""),
-            "Putere cedată (kVA)": pod.get("Released_Power_KVA__c", ""),
+            "Piata": normalize_title(pod.get("Market_Type__c", "")),
+            "Putere absorbita (kW)": pod.get("Absorbed_Power_KW__c", ""),
+            "Putere absorbita (kVA)": pod.get("Absorbed_Power_KVA__c", ""),
+            "Putere cedata (kW)": pod.get("Released_Power_KW__c", ""),
+            "Putere cedata (kVA)": pod.get("Released_Power_KVA__c", ""),
             "Nivel tensiune": pod.get("Voltage_Level__c", ""),
-            "Tensiune nominală (kV)": pod.get("Nominal_Voltage_kV__c", ""),
+            "Tensiune nominala (kV)": pod.get("Nominal_Voltage_kV__c", ""),
             "Serie contor": pod.get("EA_METER_SERIE__c", ""),
             "Tip contor": pod.get("EA_METER_TYPE__c", ""),
             "Smart meter": self._ctx.is_smart,
             "Prosumer": self._ctx.is_prosumer,
             "Tarif": pod.get("TARIFF__c", ""),
             "Profil consum": pod.get("ConsumptionProfile__c", ""),
-            "Constantă contor": pod.get("EA_CONSTANT__c", ""),
+            "Constanta contor": pod.get("EA_CONSTANT__c", ""),
             "Precizie": pod.get("EA_PRECISION__c", ""),
-            "Unitate operativă": pod.get("Operative_Unit__c", ""),
-            "Zonă": pod.get("Zone_Cod__c", ""),
+            "Unitate operativa": pod.get("Operative_Unit__c", ""),
+            "Zona": pod.get("Zone_Cod__c", ""),
             "Cod CFT": pod.get("CFT_Code__c", ""),
             "ATR": pod.get("ATR__c", ""),
-            "Perioadă măsurare": pod.get("MeasurementPeriod__c", ""),
-            "Dată start contract": pod.get("ContractStartDate__c", ""),
+            "Perioada masurare": pod.get("MeasurementPeriod__c", ""),
+            "Data start contract": pod.get("ContractStartDate__c", ""),
             "Distribuitor": normalize_title(
                 (pod.get("DistributionCompany__r") or {}).get("Name", "")
             ),
@@ -274,6 +285,8 @@ class InformatiiPodSensor(ReteleElectriceSensorBase):
 
 
 class InformatiiContSensor(ReteleElectriceSensorBase):
+    """Sensor exposing account and contact details."""
+
     def __init__(self, coordinator, config_entry, ctx: PodContext) -> None:
         super().__init__(
             coordinator,
@@ -304,16 +317,18 @@ class InformatiiContSensor(ReteleElectriceSensorBase):
             "Telefon": account.get("Mobile_Phone__c", "") or contact.get("MobilePhone", ""),
             "CNP": account.get("CNP__c", ""),
             "Cod fiscal": account.get("Fiscal_Code__c", ""),
-            "Adresă": normalize_title(account.get("Address__c", "")),
-            "Oraș": normalize_title(account.get("City__c", "")),
-            "Județ": normalize_title(account.get("County__c", "")),
-            "Cod poștal": account.get("ZIP_COD__c", ""),
+            "Adresa": normalize_title(account.get("Address__c", "")),
+            "Oras": normalize_title(account.get("City__c", "")),
+            "Judet": normalize_title(account.get("County__c", "")),
+            "Cod postal": account.get("ZIP_COD__c", ""),
             "Tip cont": normalize_title((account.get("RecordType") or {}).get("Name", "")),
             "attribution": ATTRIBUTION,
         }
 
 
 class IndexCitireConsumSensor(ReteleElectriceSensorBase):
+    """Sensor for the latest active energy consumption meter reading."""
+
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
@@ -348,8 +363,8 @@ class IndexCitireConsumSensor(ReteleElectriceSensorBase):
             "Data citire": _format_reading_date(latest.get("measureDate", "")),
             "Tip citire": normalize_title(latest.get("typeOfReading", "")),
             "Serie contor": latest.get("SerialNumber", ""),
-            "Constantă": latest.get("constanta", ""),
-            "Index energie consumată (kWh)": ea_val,
+            "Constanta": latest.get("constanta", ""),
+            "Index energie consumata (kWh)": ea_val,
         }
 
         if len(readings) >= 2:
@@ -357,13 +372,15 @@ class IndexCitireConsumSensor(ReteleElectriceSensorBase):
             prev_ea = _get_energy_value(prev.get("meter", []), "EA")
             if ea_val is not None and prev_ea is not None:
                 attrs["Consum lunar (kWh)"] = round(ea_val - prev_ea, 3)
-                attrs["Citire anterioară"] = _format_reading_date(prev.get("measureDate", ""))
+                attrs["Citire anterioara"] = _format_reading_date(prev.get("measureDate", ""))
 
         attrs["attribution"] = ATTRIBUTION
         return attrs
 
 
 class IndexCitireProductieSensor(ReteleElectriceSensorBase):
+    """Sensor for the latest active energy production meter reading."""
+
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
@@ -374,7 +391,7 @@ class IndexCitireProductieSensor(ReteleElectriceSensorBase):
             config_entry,
             ctx,
             sensor_key="index_citire_productie",
-            sensor_name="Index citire producție",
+            sensor_name="Index citire productie",
             icon="mdi:solar-power",
         )
 
@@ -398,22 +415,24 @@ class IndexCitireProductieSensor(ReteleElectriceSensorBase):
             "Data citire": _format_reading_date(latest.get("measureDate", "")),
             "Tip citire": normalize_title(latest.get("typeOfReading", "")),
             "Serie contor": latest.get("SerialNumber", ""),
-            "Constantă": latest.get("constanta", ""),
-            "Index energie produsă (kWh)": eap_val,
+            "Constanta": latest.get("constanta", ""),
+            "Index energie produsa (kWh)": eap_val,
         }
 
         if len(readings) >= 2:
             prev = readings[1]
             prev_eap = _get_energy_value(prev.get("meter", []), "EAP")
             if eap_val is not None and prev_eap is not None:
-                attrs["Producție lunară (kWh)"] = round(eap_val - prev_eap, 3)
-                attrs["Citire anterioară"] = _format_reading_date(prev.get("measureDate", ""))
+                attrs["Productie lunara (kWh)"] = round(eap_val - prev_eap, 3)
+                attrs["Citire anterioara"] = _format_reading_date(prev.get("measureDate", ""))
 
         attrs["attribution"] = ATTRIBUTION
         return attrs
 
 
 class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
+    """Sensor summarizing annual consumed energy and individual readings."""
+
     def __init__(self, coordinator, config_entry, ctx: PodContext, year: int) -> None:
         self._year = year
         super().__init__(
@@ -421,7 +440,7 @@ class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
             config_entry,
             ctx,
             sensor_key=f"arhiva_energie_consumata_{year}",
-            sensor_name=f"{year} → Energie consumată",
+            sensor_name=f"{year} -> Energie consumata",
             icon="mdi:history",
         )
 
@@ -429,7 +448,7 @@ class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
     def native_value(self) -> str | None:
         year_readings = self._get_year_readings()
         if not year_readings:
-            return "Fără date"
+            return "Fara date"
 
         first_ea = _get_energy_value(year_readings[-1].get("meter", []), "EA")
         last_ea = _get_energy_value(year_readings[0].get("meter", []), "EA")
@@ -438,7 +457,7 @@ class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
             return f"{round(last_ea - first_ea, 3)} kWh"
 
         ea = _get_energy_value(year_readings[0].get("meter", []), "EA")
-        return f"{ea} kWh" if ea is not None else "Fără date"
+        return f"{ea} kWh" if ea is not None else "Fara date"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -450,7 +469,7 @@ class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
         for reading in year_readings:
             date_label = _format_reading_date(reading.get("measureDate", ""))
             ea_val = _get_energy_value(reading.get("meter", []), "EA")
-            attrs[date_label] = f"{ea_val} kWh" if ea_val is not None else "fără date"
+            attrs[date_label] = f"{ea_val} kWh" if ea_val is not None else "fara date"
 
         attrs["Total citiri"] = len(year_readings)
         attrs["Serie contor"] = year_readings[0].get("SerialNumber", "")
@@ -463,6 +482,8 @@ class ArhivaEnergieConsumataSensor(ReteleElectriceSensorBase):
 
 
 class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
+    """Sensor summarizing annual produced energy and individual readings."""
+
     def __init__(self, coordinator, config_entry, ctx: PodContext, year: int) -> None:
         self._year = year
         super().__init__(
@@ -470,7 +491,7 @@ class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
             config_entry,
             ctx,
             sensor_key=f"arhiva_energie_produsa_{year}",
-            sensor_name=f"{year} → Energie produsă",
+            sensor_name=f"{year} -> Energie produsa",
             icon="mdi:solar-power",
         )
 
@@ -478,7 +499,7 @@ class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
     def native_value(self) -> str | None:
         year_readings = self._get_year_readings()
         if not year_readings:
-            return "Fără date"
+            return "Fara date"
 
         first_eap = _get_energy_value(year_readings[-1].get("meter", []), "EAP")
         last_eap = _get_energy_value(year_readings[0].get("meter", []), "EAP")
@@ -487,7 +508,7 @@ class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
             return f"{round(last_eap - first_eap, 3)} kWh"
 
         eap = _get_energy_value(year_readings[0].get("meter", []), "EAP")
-        return f"{eap} kWh" if eap is not None else "Fără date"
+        return f"{eap} kWh" if eap is not None else "Fara date"
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -499,7 +520,7 @@ class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
         for reading in year_readings:
             date_label = _format_reading_date(reading.get("measureDate", ""))
             eap_val = _get_energy_value(reading.get("meter", []), "EAP")
-            attrs[date_label] = f"{eap_val} kWh" if eap_val is not None else "fără date"
+            attrs[date_label] = f"{eap_val} kWh" if eap_val is not None else "fara date"
 
         attrs["Total citiri"] = len(year_readings)
         attrs["Serie contor"] = year_readings[0].get("SerialNumber", "")
@@ -512,13 +533,15 @@ class ArhivaEnergieProdusSensor(ReteleElectriceSensorBase):
 
 
 class IntreruperiCurentSensor(ReteleElectriceSensorBase):
+    """Sensor reporting power outage status for a POD."""
+
     def __init__(self, coordinator, config_entry, ctx: PodContext) -> None:
         super().__init__(
             coordinator,
             config_entry,
             ctx,
             sensor_key="intreruperi_curent",
-            sensor_name="Întreruperi curent",
+            sensor_name="Intreruperi curent",
             icon="mdi:flash-alert",
         )
 
@@ -526,15 +549,15 @@ class IntreruperiCurentSensor(ReteleElectriceSensorBase):
     def native_value(self) -> str | None:
         outage_data = self._get_outage_data()
         if not outage_data:
-            return "Fără date"
+            return "Fara date"
 
         data_obj = outage_data.get("data")
         if isinstance(data_obj, dict):
             check = data_obj.get("checkInterruzione", "")
             if check == "true":
-                return "Fără întreruperi"
+                return "Fara intreruperi"
             if check == "false":
-                return "Întrerupere activă"
+                return "Intrerupere activa"
 
         return outage_data.get("esito", "") or "Necunoscut"
 
@@ -550,7 +573,7 @@ class IntreruperiCurentSensor(ReteleElectriceSensorBase):
             messaggio = data_obj.get("messaggio", "")
             if messaggio:
                 attrs["Mesaj"] = decode_html_entities(messaggio)
-            attrs["Verificare întreruperi"] = data_obj.get("checkInterruzione", "")
+            attrs["Verificare intreruperi"] = data_obj.get("checkInterruzione", "")
             attrs["Rezultat"] = data_obj.get("esito", "")
 
         attrs["attribution"] = ATTRIBUTION
@@ -563,6 +586,8 @@ class IntreruperiCurentSensor(ReteleElectriceSensorBase):
 
 
 class SmartMeterConsumSensor(ReteleElectriceSensorBase):
+    """Sensor for historical smart meter consumption summary."""
+
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "kWh"
@@ -599,20 +624,20 @@ class SmartMeterConsumSensor(ReteleElectriceSensorBase):
         attrs: dict = {
             "POD": row.get("POD", self._ctx.pod_name),
             "Contor": row.get("METER", ""),
-            "Perioadă start": row.get("START_DATE", ""),
-            "Perioadă sfârșit": row.get("END_DATE", ""),
-            "Total energie consumată (kWh)": safe_float(row.get("SUM_EA", "0")),
-            "Vârf consum (kWh)": safe_float(row.get("MAX_EA", "0")),
+            "Perioada start": row.get("START_DATE", ""),
+            "Perioada sfarsit": row.get("END_DATE", ""),
+            "Total energie consumata (kWh)": safe_float(row.get("SUM_EA", "0")),
+            "Varf consum (kWh)": safe_float(row.get("MAX_EA", "0")),
         }
 
         if row.get("SUM_ER"):
-            attrs["Total energie reactivă (kVArh)"] = safe_float(row["SUM_ER"])
+            attrs["Total energie reactiva (kVArh)"] = safe_float(row["SUM_ER"])
         if row.get("MAX_ER"):
-            attrs["Vârf energie reactivă (kVArh)"] = safe_float(row["MAX_ER"])
+            attrs["Varf energie reactiva (kVArh)"] = safe_float(row["MAX_ER"])
 
         cosfi = row.get("COSFI", "-9999")
         if cosfi and cosfi != "-9999":
-            attrs["Factor de putere (cosφ)"] = safe_float(cosfi)
+            attrs["Factor de putere (cos phi)"] = safe_float(cosfi)
 
         attrs["Rezultat"] = sm_data.get("Result", "")
         attrs["attribution"] = ATTRIBUTION
@@ -625,6 +650,8 @@ class SmartMeterConsumSensor(ReteleElectriceSensorBase):
 
 
 class SmartMeterProductieSensor(ReteleElectriceSensorBase):
+    """Sensor for historical smart meter production summary."""
+
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "kWh"
@@ -635,7 +662,7 @@ class SmartMeterProductieSensor(ReteleElectriceSensorBase):
             config_entry,
             ctx,
             sensor_key="smart_meter_productie",
-            sensor_name="Smart Meter Producție",
+            sensor_name="Smart Meter Productie",
             icon="mdi:solar-power",
         )
 
@@ -661,16 +688,16 @@ class SmartMeterProductieSensor(ReteleElectriceSensorBase):
         attrs: dict = {
             "POD": row.get("POD", self._ctx.pod_name),
             "Contor": row.get("METER", ""),
-            "Perioadă start": row.get("START_DATE", ""),
-            "Perioadă sfârșit": row.get("END_DATE", ""),
-            "Total energie produsă (kWh)": safe_float(row.get("SUM_EAP", "0")),
-            "Vârf producție (kWh)": safe_float(row.get("MAX_EAP", "0")),
+            "Perioada start": row.get("START_DATE", ""),
+            "Perioada sfarsit": row.get("END_DATE", ""),
+            "Total energie produsa (kWh)": safe_float(row.get("SUM_EAP", "0")),
+            "Varf productie (kWh)": safe_float(row.get("MAX_EAP", "0")),
         }
 
         if row.get("SUM_ERC"):
-            attrs["Total energie reactivă capacitivă (kVArh)"] = safe_float(row["SUM_ERC"])
+            attrs["Total energie reactiva capacitiva (kVArh)"] = safe_float(row["SUM_ERC"])
         if row.get("MAX_ERC"):
-            attrs["Vârf energie reactivă capacitivă (kVArh)"] = safe_float(row["MAX_ERC"])
+            attrs["Varf energie reactiva capacitiva (kVArh)"] = safe_float(row["MAX_ERC"])
 
         cosfic = row.get("COSFIC", "-9999")
         if cosfic and cosfic != "-9999":
@@ -687,6 +714,7 @@ class SmartMeterProductieSensor(ReteleElectriceSensorBase):
 
 
 def _parse_comma_float(value: str | None) -> float | None:
+    """Parse a decimal string with comma or dot separator; ignore sentinel -9999."""
     if not value or value == "-9999":
         return None
     try:
@@ -696,12 +724,14 @@ def _parse_comma_float(value: str | None) -> float | None:
 
 
 def _get_instant_data(coordinator, pod_name: str) -> dict | None:
+    """Return instantaneous smart meter payload for a POD."""
     if not coordinator.data:
         return None
     return coordinator.data.get("instant_values", {}).get(pod_name)
 
 
 def _get_instant_energy(instant_data: dict, code: str) -> float | None:
+    """Extract an instantaneous energy register value (EA, EAP, ER, ERC)."""
     if not instant_data:
         return None
     value_list = instant_data.get("dataIstantValueList")
@@ -717,6 +747,8 @@ def _get_instant_energy(instant_data: dict, code: str) -> float | None:
 
 
 class ValoareInstantaneeConsumSensor(ReteleElectriceSensorBase):
+    """Sensor for instantaneous active consumption and electrical phase attributes."""
+
     _attr_has_entity_name = True
     _attr_translation_key = "valoare_instantanee_consum"
     _attr_icon = "mdi:flash"
@@ -771,11 +803,11 @@ class ValoareInstantaneeConsumSensor(ReteleElectriceSensorBase):
 
         p_val = _parse_comma_float(first.get("P_VALUE"))
         if p_val is not None:
-            attrs["Putere activă instantanee (kW)"] = p_val
+            attrs["Putere activa instantanee (kW)"] = p_val
 
         er_val = _get_instant_energy(instant, "ER")
         if er_val is not None:
-            attrs["Energie reactivă (kVArh)"] = er_val
+            attrs["Energie reactiva (kVArh)"] = er_val
 
         if first.get("READING_DATE"):
             attrs["Data citire"] = first["READING_DATE"]
@@ -791,6 +823,8 @@ class ValoareInstantaneeConsumSensor(ReteleElectriceSensorBase):
 
 
 class ValoareInstantaneeProductieSensor(ReteleElectriceSensorBase):
+    """Sensor for instantaneous active production on prosumer smart meters."""
+
     _attr_has_entity_name = True
     _attr_translation_key = "valoare_instantanee_productie"
     _attr_icon = "mdi:solar-power"
@@ -809,7 +843,7 @@ class ValoareInstantaneeProductieSensor(ReteleElectriceSensorBase):
             config_entry,
             ctx,
             sensor_key="valoare_instantanee_productie",
-            sensor_name="Valoare instantanee producție",
+            sensor_name="Valoare instantanee productie",
             icon="mdi:solar-power",
         )
 
@@ -828,11 +862,11 @@ class ValoareInstantaneeProductieSensor(ReteleElectriceSensorBase):
 
         eap_val = _get_instant_energy(instant, "EAP")
         if eap_val is not None:
-            attrs["Energie activă produsă (kWh)"] = eap_val
+            attrs["Energie activa produsa (kWh)"] = eap_val
 
         erc_val = _get_instant_energy(instant, "ERC")
         if erc_val is not None:
-            attrs["Energie reactivă capacitivă (kVArh)"] = erc_val
+            attrs["Energie reactiva capacitiva (kVArh)"] = erc_val
 
         value_list = instant.get("dataIstantValueList")
         if value_list and isinstance(value_list, list):
@@ -859,6 +893,7 @@ _LUNI_RO = {
 
 
 def _format_date_friendly(date_str: str | None) -> str | None:
+    """Format ISO (YYYY-MM-DD) or dot-separated (DD.MM.YYYY) dates."""
     if not date_str:
         return None
     date_str = date_str.strip()
@@ -880,6 +915,8 @@ def _format_date_friendly(date_str: str | None) -> str | None:
 
 
 class DateFurnizorSensor(ReteleElectriceSensorBase):
+    """Sensor exposing supplier and technical POD metadata from queryPOD."""
+
     _attr_has_entity_name = True
     _attr_translation_key = "date_furnizor"
     _attr_icon = "mdi:office-building"
@@ -914,18 +951,18 @@ class DateFurnizorSensor(ReteleElectriceSensorBase):
 
         mapping = [
             ("furnizor", "Furnizor"),
-            ("furnizor_pre", "PRE (Operator distribuție)"),
+            ("furnizor_pre", "PRE (Operator distributie)"),
             ("cui", "CUI furnizor"),
             ("nume_client", "Nume client"),
-            ("adresa_client", "Adresă client"),
-            ("adresa_locons", "Adresă loc de consum"),
-            ("kw_aprobata", "Putere aprobată (kW)"),
-            ("kw_evacuata", "Putere evacuată (kW)"),
+            ("adresa_client", "Adresa client"),
+            ("adresa_locons", "Adresa loc de consum"),
+            ("kw_aprobata", "Putere aprobata (kW)"),
+            ("kw_evacuata", "Putere evacuata (kW)"),
             ("delimitare", "Punct delimitare"),
             ("u_delimitare", "Tensiune punct delimitare"),
-            ("cft_description", "Zonă distribuție"),
-            ("cft_ou_description", "Unitate operațională"),
-            ("cft_district_uo", "Județ distribuție"),
+            ("cft_description", "Zona distributie"),
+            ("cft_ou_description", "Unitate operationala"),
+            ("cft_district_uo", "Judet distributie"),
             ("aggregation_formula", "Formula agregare"),
             ("compensation_mode", "Mod compensare"),
         ]
@@ -950,7 +987,7 @@ class DateFurnizorSensor(ReteleElectriceSensorBase):
             atr_str = supplier["atr_number"]
             if supplier.get("atr_date"):
                 atr_str += f" / {_format_date_friendly(supplier['atr_date'])}"
-            attrs["Nr. și data ATR/CER"] = atr_str
+            attrs["Nr. si data ATR/CER"] = atr_str
 
         if supplier.get("cer_version"):
             cer_str = f"v{supplier['cer_version']}"
@@ -975,11 +1012,11 @@ class DateFurnizorSensor(ReteleElectriceSensorBase):
             if c.get("precizie"):
                 attrs["Precizie"] = c["precizie"]
             if c.get("constanta"):
-                attrs["Constantă"] = c["constanta"]
+                attrs["Constanta"] = c["constanta"]
 
         corectii = supplier.get("corectii")
         if corectii and corectii.strip() not in ("", "-"):
-            attrs["Corecții"] = corectii
+            attrs["Corectii"] = corectii
 
         attrs["attribution"] = ATTRIBUTION
         return attrs
