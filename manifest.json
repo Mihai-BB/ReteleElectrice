@@ -1,0 +1,11 @@
+{
+  "domain": "reteleelectrice",
+  "name": "Rețele Electrice România",
+  "codeowners": ["@mihaibb"],
+  "config_flow": true,
+  "documentation": "https://contulmeu.reteleelectrice.ro",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "requirements": ["aiohttp>=3.8.0"],
+  "version": "1.0.0"
+}
