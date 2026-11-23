@@ -1,10 +1,10 @@
-"""Constante pentru integrarea Rețele Electrice România."""
+"""Constants for the Retele Electrice Romania integration."""
 
 DOMAIN = "reteleelectrice"
-DEFAULT_UPDATE = 3600  # secunde (1 oră)
-MIN_UPDATE = 900       # 15 minute
-MAX_UPDATE = 86400     # 24 ore
-ATTRIBUTION = "Date furnizate de Rețele Electrice România"
+DEFAULT_UPDATE = 3600  # seconds (1 hour)
+MIN_UPDATE = 900       # 15 minutes
+MAX_UPDATE = 86400     # 24 hours
+ATTRIBUTION = "Data provided by Retele Electrice Romania"
 
 BASE_URL = "https://contulmeu.reteleelectrice.ro"
 LOGIN_PAGE = f"{BASE_URL}/PEDRO_SiteLogin"
@@ -33,6 +33,7 @@ BROWSER_HEADERS = {
     "sec-ch-ua-platform": '"macOS"',
 }
 
+# Maps backend method names to their Visualforce proxy page names
 VF_PAGE_MAP: dict[str, str] = {
     "CurveDiCaricoGraph": "PED_ProxyCallWSAsync_Curve_VF",
     "RetriveSingleSelf": "PED_ProxyCallWSAsynSingleSelf_VF",
