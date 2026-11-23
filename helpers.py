@@ -1,4 +1,4 @@
-"""Funcții utilitare pentru integrarea Rețele Electrice România."""
+"""Helper utilities for the Retele Electrice Romania integration."""
 
 from __future__ import annotations
 
@@ -9,14 +9,14 @@ from .const import MONTHS_NUM_RO
 
 
 def decode_html_entities(text: str | None) -> str:
-    """Decodează entitățile HTML din mesajele portalului."""
+    """Decode HTML entities from portal messages."""
     if not text:
         return ""
     return html.unescape(str(text)).strip()
 
 
 def normalize_title(text: str | None) -> str:
-    """Formatează textul în Title Case păstrând acronimele scurte."""
+    """Format text in title case while preserving short uppercase acronyms."""
     if not text:
         return ""
     cleaned = decode_html_entities(text)
@@ -31,7 +31,7 @@ def normalize_title(text: str | None) -> str:
 
 
 def safe_float(value: Any, default: float | None = 0.0) -> float | None:
-    """Convertește în float în siguranță."""
+    """Safely convert a value to float."""
     if value is None or value == "":
         return default
     try:
@@ -41,7 +41,7 @@ def safe_float(value: Any, default: float | None = 0.0) -> float | None:
 
 
 def format_date_ro_ddmmyyyy(date_str: str | None) -> str:
-    """Formatează data din DD.MM.YYYY în '1 decembrie 2025'."""
+    """Format a DD.MM.YYYY date string with a Romanian month name."""
     if not date_str:
         return ""
     base = str(date_str).split(" ")[0].strip()
@@ -58,7 +58,7 @@ def format_date_ro_ddmmyyyy(date_str: str | None) -> str:
 
 
 def build_pod_address(pod: dict[str, Any]) -> str:
-    """Construiește adresa completă a unui POD din câmpurile Salesforce."""
+    """Build a formatted address string for a POD from Salesforce fields."""
     if not isinstance(pod, dict):
         return ""
 
@@ -82,4 +82,4 @@ def build_pod_address(pod: dict[str, Any]) -> str:
     if county:
         parts.append(f"jud. {normalize_title(county)}")
 
-    return ", ".join(parts) if parts else "Adresă indisponibilă"
+    return ", ".join(parts) if parts else "Address unavailable"
