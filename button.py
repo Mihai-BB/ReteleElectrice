@@ -1,6 +1,4 @@
-"""
-Platforma Button pentru Rețele Electrice România.
-"""
+"""Button platform for the Retele Electrice Romania integration."""
 
 import logging
 
@@ -24,7 +22,7 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Configurare butoane: un buton per POD smart meter."""
+    """Set up button entities: one button per smart meter POD."""
     coordinator: ReteleElectriceCoordinator = config_entry.runtime_data
 
     if not coordinator.data:
@@ -63,7 +61,7 @@ async def async_setup_entry(
 class ActualizareInstantaneeButton(
     CoordinatorEntity[ReteleElectriceCoordinator], ButtonEntity
 ):
-    """Buton pentru forțarea actualizării valorilor instantanee."""
+    """Button entity to force a refresh of instantaneous meter values."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "actualizare_instantanee"
@@ -78,6 +76,7 @@ class ActualizareInstantaneeButton(
         account_name: str,
         address: str,
     ) -> None:
+        """Initialize the button for a smart meter POD."""
         super().__init__(coordinator)
         self._pod_name = pod_name
         self._pod_data = pod_data
@@ -88,16 +87,17 @@ class ActualizareInstantaneeButton(
 
     @property
     def device_info(self) -> DeviceInfo:
+        """Return device registry info for this POD."""
         return DeviceInfo(
             identifiers={(DOMAIN, self._pod_name)},
-            name=f"Rețele Electrice {self._pod_name}",
-            manufacturer="Rețele Electrice România",
-            model="Rețele Electrice România",
+            name=f"Retele Electrice {self._pod_name}",
+            manufacturer="Retele Electrice Romania",
+            model="Retele Electrice Romania",
             entry_type=DeviceEntryType.SERVICE,
         )
 
     async def async_press(self) -> None:
-        """Forțează actualizarea valorilor instantanee."""
+        """Force a refresh of instantaneous values from the portal."""
         cnp = ""
         account = (self.coordinator.data or {}).get("account_info")
         if account and isinstance(account, dict):
@@ -109,21 +109,22 @@ class ActualizareInstantaneeButton(
             )
         except Exception as err:
             raise HomeAssistantError(
-                f"Eroare la actualizarea valorilor instantanee (POD {self._pod_name}): {err}"
+                f"Failed to refresh instantaneous values (POD {self._pod_name}): {err}"
             ) from err
 
         if _vf_failed(result):
             raise HomeAssistantError(
-                f"Portalul Rețele Electrice nu a returnat valori instantanee "
-                f"pentru POD {self._pod_name}. Încercați din nou mai târziu."
+                f"Portal did not return instantaneous values for POD {self._pod_name}."
             )
 
+        # Update coordinator cache in place so dependent sensors refresh immediately.
         data = dict(self.coordinator.data or {})
         data["instant_values"] = {**(data.get("instant_values") or {}), self._pod_name: result}
         self.coordinator.async_set_updated_data(data)
 
     @property
     def extra_state_attributes(self) -> dict:
+        """Return extra state attributes for the button."""
         return {
             "POD": self._pod_name,
             "attribution": ATTRIBUTION,
