@@ -2,77 +2,77 @@
   "config": {
     "step": {
       "user": {
-        "title": "Conectare la Rețele Electrice",
-        "description": "Introduceți adresa de email și parola contului contulmeu.reteleelectrice.ro",
+        "title": "Connect to Retele Electrice",
+        "description": "Enter the email address and password for your contulmeu.reteleelectrice.ro account",
         "data": {
           "username": "Email",
-          "password": "Parolă",
-          "update_interval": "Interval actualizare (secunde)"
+          "password": "Password",
+          "update_interval": "Update interval (seconds)"
         }
       },
       "select_pod": {
-        "title": "Selectați punctele de consum (POD)",
-        "description": "Puteți monitoriza toate punctele de consum sau doar cele dorite. Selectați ce doriți să urmăriți.",
+        "title": "Select consumption points (POD)",
+        "description": "You can monitor all consumption points or only selected ones. Choose what you want to track.",
         "data": {
-          "select_all": "Monitorizează toate punctele de consum",
-          "selected_pods": "Selectați punctele de consum dorite"
+          "select_all": "Monitor all consumption points",
+          "selected_pods": "Select desired consumption points"
         }
       }
     },
     "error": {
-      "auth_failed": "Autentificare eșuată. Verificați adresa de email și parola.",
-      "no_data": "Autentificare reușită, dar nu s-au găsit date pentru acest cont.",
-      "no_pod_selected": "Trebuie să selectați cel puțin un punct de consum sau să activați opțiunea pentru toate."
+      "auth_failed": "Authentication failed. Check your email address and password.",
+      "no_data": "Authentication succeeded, but no data was found for this account.",
+      "no_pod_selected": "Select at least one consumption point or enable the option for all."
     },
     "abort": {
-      "already_configured": "Acest cont Rețele Electrice este deja configurat."
+      "already_configured": "This Retele Electrice account is already configured."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Setări cont",
-        "description": "Actualizați credențialele și intervalul de actualizare.",
+        "title": "Account settings",
+        "description": "Update credentials and the polling interval.",
         "data": {
           "username": "Email",
-          "password": "Parolă",
-          "update_interval": "Interval actualizare (secunde)"
+          "password": "Password",
+          "update_interval": "Update interval (seconds)"
         }
       },
       "select_pod": {
-        "title": "Selectați punctele de consum (POD)",
-        "description": "Actualizați punctele de consum pe care doriți să le monitorizați.",
+        "title": "Select consumption points (POD)",
+        "description": "Update the consumption points you want to monitor.",
         "data": {
-          "select_all": "Monitorizează toate punctele de consum",
-          "selected_pods": "Selectați punctele de consum dorite"
+          "select_all": "Monitor all consumption points",
+          "selected_pods": "Select desired consumption points"
         }
       }
     },
     "error": {
-      "auth_failed": "Autentificare eșuată. Verificați adresa de email și parola.",
-      "no_data": "Autentificare reușită, dar nu s-au găsit date pentru acest cont.",
-      "no_pod_selected": "Trebuie să selectați cel puțin un punct de consum sau să activați opțiunea pentru toate.",
-      "already_configured": "Acest cont este deja configurat în altă intrare."
+      "auth_failed": "Authentication failed. Check your email address and password.",
+      "no_data": "Authentication succeeded, but no data was found for this account.",
+      "no_pod_selected": "Select at least one consumption point or enable the option for all.",
+      "already_configured": "This account is already configured in another entry."
     }
   },
   "entity": {
     "sensor": {
       "informatii_pod": { "name": "POD" },
-      "informatii_cont": { "name": "Date utilizator" },
-      "index_citire_consum": { "name": "Index citire consum" },
-      "index_citire_productie": { "name": "Index citire producție" },
-      "arhiva_energie_consumata": { "name": "Energie consumată" },
-      "arhiva_energie_produsa": { "name": "Energie produsă" },
-      "intreruperi_curent": { "name": "Întreruperi curent" },
-      "smart_meter_consum": { "name": "Smart Meter Consum" },
-      "smart_meter_productie": { "name": "Smart Meter Producție" },
-      "valoare_instantanee_consum": { "name": "Valoare instantanee consum" },
-      "valoare_instantanee_productie": { "name": "Valoare instantanee producție" },
-      "date_furnizor": { "name": "Date furnizor" }
+      "informatii_cont": { "name": "Account details" },
+      "index_citire_consum": { "name": "Consumption reading index" },
+      "index_citire_productie": { "name": "Production reading index" },
+      "arhiva_energie_consumata": { "name": "Consumed energy" },
+      "arhiva_energie_produsa": { "name": "Produced energy" },
+      "intreruperi_curent": { "name": "Power outages" },
+      "smart_meter_consum": { "name": "Smart Meter Consumption" },
+      "smart_meter_productie": { "name": "Smart Meter Production" },
+      "valoare_instantanee_consum": { "name": "Instantaneous consumption" },
+      "valoare_instantanee_productie": { "name": "Instantaneous production" },
+      "date_furnizor": { "name": "Supplier details" }
     },
     "button": {
       "actualizare_instantanee": {
-        "name": "Actualizare valori instantanee"
+        "name": "Refresh instantaneous values"
       }
     }
   }
