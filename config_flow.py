@@ -1,6 +1,4 @@
-"""
-ConfigFlow și OptionsFlow pentru integrarea Rețele Electrice România.
-"""
+"""ConfigFlow and OptionsFlow for the Retele Electrice Romania integration."""
 
 from __future__ import annotations
 
@@ -34,7 +32,7 @@ _INTERVAL = vol.All(vol.Coerce(int), vol.Range(min=MIN_UPDATE, max=MAX_UPDATE))
 
 
 def _build_pod_options(pods: list[dict]) -> list[SelectOptionDict]:
-    """Construiește lista de opțiuni pentru selectorul de POD-uri."""
+    """Build selector options for discovered PODs."""
     options: list[SelectOptionDict] = []
 
     for pod in pods:
@@ -46,7 +44,7 @@ def _build_pod_options(pods: list[dict]) -> list[SelectOptionDict]:
         contract_type = pod.get("Contract_Type__c", "")
         smart_meter = pod.get("Smart_meter__c", False) or pod.get("IsSmartMeter__c", False)
 
-        label = f"{address} ➜ POD: {pod_name}"
+        label = f"{address} -> POD: {pod_name}"
         if contract_type:
             label += f" ({contract_type})"
         if smart_meter:
@@ -58,7 +56,7 @@ def _build_pod_options(pods: list[dict]) -> list[SelectOptionDict]:
 
 
 def _extract_all_pod_names(pods: list[dict]) -> list[str]:
-    """Extrage toate numele POD-urilor unice."""
+    """Extract unique POD identifiers in order."""
     names: list[str] = []
     for pod in pods:
         name = pod.get("Name", "") or pod.get("POD__c", "")
@@ -72,18 +70,19 @@ def _resolve_selected_pods(
     selected: list[str],
     pods: list[dict],
 ) -> list[str]:
-    """Returnează lista finală de POD-uri."""
+    """Resolve the final list of PODs to monitor."""
     if select_all:
         return _extract_all_pod_names(pods)
     return selected
 
 
 class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """ConfigFlow — autentificare + selecție POD-uri."""
+    """Config flow handling authentication and POD selection."""
 
     VERSION = 3
 
     def __init__(self) -> None:
+        """Initialize temporary flow state."""
         self._username: str = ""
         self._password: str = ""
         self._update_interval: int = DEFAULT_UPDATE
@@ -92,6 +91,7 @@ class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Handle the initial credentials and polling interval step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -140,6 +140,7 @@ class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_select_pod(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        """Handle POD selection and create the config entry."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -154,7 +155,7 @@ class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
                 return self.async_create_entry(
-                    title=f"Rețele Electrice ({self._username})",
+                    title=f"Retele Electrice ({self._username})",
                     data={
                         "username": self._username,
                         "password": self._password,
@@ -190,13 +191,15 @@ class ReteleElectriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> ReteleElectriceOptionsFlow:
+        """Return the options flow handler."""
         return ReteleElectriceOptionsFlow()
 
 
 class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
-    """OptionsFlow — modificare credențiale, interval și selecție POD-uri."""
+    """Options flow for updating credentials, interval, and selected PODs."""
 
     def __init__(self) -> None:
+        """Initialize temporary options state."""
         self._username: str = ""
         self._password: str = ""
         self._update_interval: int = DEFAULT_UPDATE
@@ -205,7 +208,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Modificare credențiale și interval de actualizare."""
+        """Update credentials and polling interval."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -219,6 +222,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                 self.hass, username=username, password=password
             )
 
+            # Prevent duplicate entries if the username matches another entry
             conflict = any(
                 e.entry_id != self.config_entry.entry_id
                 and e.unique_id == username.lower()
@@ -269,7 +273,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
     async def async_step_select_pod(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Modificare selecție POD-uri."""
+        """Update selected PODs and reload the config entry."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -292,7 +296,7 @@ class ReteleElectriceOptionsFlow(config_entries.OptionsFlow):
                         "select_all": select_all,
                         "selected_pods": final_selection,
                     },
-                    title=f"Rețele Electrice ({self._username})",
+                    title=f"Retele Electrice ({self._username})",
                     unique_id=self._username.lower(),
                 )
 
