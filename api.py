@@ -1,19 +1,17 @@
-"""
-API Manager pentru integrarea Rețele Electrice România.
+"""Async API manager for the Retele Electrice Romania integration.
 
-Convertire async a reteleelectrice_login.py.
 Portal: contulmeu.reteleelectrice.ro (Salesforce Experience Cloud)
 
 Auth Flow:
-    1. GET  PEDRO_SiteLogin → extrage ViewState
-    2. POST PEDRO_SiteLogin → credențiale + ViewState
-    3. Parse JS redirect → frontdoor.jsp?sid=...
-    4. GET  frontdoor.jsp → stabilește session cookies
-    5. GET  /s/ → extrage aura fwuid + aura token
+1. GET  PEDRO_SiteLogin -> extract ViewState
+2. POST PEDRO_SiteLogin -> credentials + ViewState
+3. Parse JS redirect -> frontdoor.jsp?sid=...
+4. GET  frontdoor.jsp -> establish session cookies
+5. GET  /s/ -> extract aura token
 
-API-uri:
-    - Aura Actions (getUserName, getAccountInfo, getPODs, etc.)
-    - VF A4J proxy (PowerOutages, ReadingArchive, SmartMeter)
+APIs:
+- Aura Actions (getUserName, getAccountInfo, getPODs, etc.)
+- VF A4J proxy (PowerOutages, ReadingArchive, SmartMeter, queryPOD)
 """
 
 from __future__ import annotations
@@ -24,13 +22,11 @@ import re
 import time
 from datetime import datetime, timedelta
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     AURA_APP_UID,
@@ -44,13 +40,14 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Timeout global pentru request-uri (secunde)
+# Global request timeout (seconds)
 REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=30)
-VF_TIMEOUT = aiohttp.ClientTimeout(total=60)  # VF calls pot fi lente (WS extern)
+# VF calls can be slow because they proxy external web services
+VF_TIMEOUT = aiohttp.ClientTimeout(total=60)
 
 
 class ReteleElectriceAPI:
-    """Manager API async pentru integrarea Rețele Electrice România."""
+    """Async API manager for Retele Electrice Romania."""
 
     def __init__(
         self,
@@ -65,11 +62,11 @@ class ReteleElectriceAPI:
         self._aura_token: str | None = None
         self._action_counter = 0
         self._logged_in = False
-        # Cookie jar separat (trebuie să rețină sesiunea Salesforce)
+        # Dedicated cookie jar to retain Salesforce session cookies
         self._cookie_jar = aiohttp.CookieJar(unsafe=True)
 
     def _get_session(self) -> aiohttp.ClientSession:
-        """Returnează o sesiune HTTP cu cookie jar propriu."""
+        """Return an HTTP session with its own cookie jar."""
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(
                 cookie_jar=self._cookie_jar,
@@ -78,7 +75,7 @@ class ReteleElectriceAPI:
         return self._session
 
     async def async_close(self) -> None:
-        """Închide sesiunea HTTP."""
+        """Close the HTTP session."""
         if self._session and not self._session.closed:
             await self._session.close()
             self._session = None
@@ -88,23 +85,21 @@ class ReteleElectriceAPI:
     # ===================================================================
 
     async def async_login(self) -> bool:
-        """Autentificare completă. Returnează True la succes."""
+        """Run full login flow. Returns True on success."""
         session = self._get_session()
         self._logged_in = False
-        # Pornim de la zero: cookie-urile unei sesiuni Salesforce expirate pot
-        # strica fluxul de login (înainte doar un reload manual — sesiune HTTP
-        # nouă — rezolva situația).
+        # Start fresh: cookies from an expired Salesforce session can break login
         self._cookie_jar.clear()
         self._aura_token = None
 
         try:
-            # --- Pas 1: GET login page ---
+            # --- Step 1: GET login page ---
             login_url = (
                 f"{LOGIN_PAGE}"
                 f"?startURL=%2Fs%2F"
                 f"&refURL=https%3A%2F%2Fcontulmeu.reteleelectrice.ro%2Fs%2F"
             )
-            _LOGGER.debug("[ReteleElectrice] Pas 1: GET login page...")
+            _LOGGER.debug("[ReteleElectrice] Step 1: GET login page...")
             async with session.get(
                 login_url,
                 allow_redirects=True,
@@ -118,8 +113,8 @@ class ReteleElectriceAPI:
                 html = await resp.text()
                 login_page_url = str(resp.url)
 
-            # --- Pas 2: Parsează formularul VF ---
-            _LOGGER.debug("[ReteleElectrice] Pas 2: Parsez formularul VF...")
+            # --- Step 2: Parse VF form ---
+            _LOGGER.debug("[ReteleElectrice] Step 2: Parsing VF form...")
             soup = await self._async_soup(html)
 
             viewstate = self._extract_field(soup, "com.salesforce.visualforce.ViewState")
@@ -127,7 +122,7 @@ class ReteleElectriceAPI:
             viewstate_mac = self._extract_field(soup, "com.salesforce.visualforce.ViewStateMAC")
 
             if not viewstate:
-                _LOGGER.error("[ReteleElectrice] ViewState nu a fost găsit în login page")
+                _LOGGER.error("[ReteleElectrice] ViewState not found on login page")
                 return False
 
             form = soup.find("form", {"id": "loginPage:loginForm"}) or soup.find("form")
@@ -136,8 +131,8 @@ class ReteleElectriceAPI:
             password_field = self._find_input_name(soup, ["password", "pw"])
             submit_field = self._find_submit_name(soup)
 
-            # --- Pas 3: POST credențiale ---
-            _LOGGER.debug("[ReteleElectrice] Pas 3: POST credențiale...")
+            # --- Step 3: POST credentials ---
+            _LOGGER.debug("[ReteleElectrice] Step 3: POST credentials...")
             payload = {
                 form_id: form_id,
                 username_field: self._username,
@@ -169,8 +164,8 @@ class ReteleElectriceAPI:
             ) as resp:
                 post_html = await resp.text()
 
-            # --- Pas 4: Detectează JS redirect către frontdoor.jsp ---
-            _LOGGER.debug("[ReteleElectrice] Pas 4: Detectez JS redirect...")
+            # --- Step 4: Detect JS redirect to frontdoor.jsp ---
+            _LOGGER.debug("[ReteleElectrice] Step 4: Detecting JS redirect...")
             frontdoor_url = None
             js_match = re.search(
                 r"window\.location\.(?:replace|href)\s*[=\(]\s*['\"]"
@@ -186,13 +181,13 @@ class ReteleElectriceAPI:
 
             if js_match:
                 frontdoor_url = js_match.group(1)
-                _LOGGER.debug("[ReteleElectrice] Frontdoor URL detectat")
+                _LOGGER.debug("[ReteleElectrice] Frontdoor URL detected")
             else:
-                _LOGGER.error("[ReteleElectrice] Nu am detectat JS redirect")
+                _LOGGER.error("[ReteleElectrice] JS redirect not detected")
                 return False
 
-            # --- Pas 5: GET frontdoor.jsp ---
-            _LOGGER.debug("[ReteleElectrice] Pas 5: GET frontdoor.jsp...")
+            # --- Step 5: GET frontdoor.jsp ---
+            _LOGGER.debug("[ReteleElectrice] Step 5: GET frontdoor.jsp...")
             async with session.get(
                 frontdoor_url,
                 allow_redirects=True,
@@ -202,8 +197,8 @@ class ReteleElectriceAPI:
                     "[ReteleElectrice] Frontdoor status: %d", resp.status
                 )
 
-            # --- Pas 6: GET /s/ → extrage Aura token ---
-            _LOGGER.debug("[ReteleElectrice] Pas 6: GET /s/ → aura token...")
+            # --- Step 6: GET /s/ -> extract Aura token ---
+            _LOGGER.debug("[ReteleElectrice] Step 6: GET /s/ -> aura token...")
             async with session.get(
                 f"{BASE_URL}/s/",
                 allow_redirects=True,
@@ -211,61 +206,61 @@ class ReteleElectriceAPI:
             ) as resp:
                 s_html = await resp.text()
 
-            # Aura token din cookie __Host-ERIC_PROD*
+            # Extract Aura token from __Host-ERIC_PROD* cookie first, then HTML
             self._aura_token = self._extract_aura_token_from_cookies()
             if not self._aura_token:
                 self._aura_token = self._extract_aura_token_from_html(s_html)
 
             if self._aura_token:
-                _LOGGER.debug("[ReteleElectrice] Aura token obținut: %s...", self._aura_token[:30])
+                _LOGGER.debug("[ReteleElectrice] Aura token obtained: %s...", self._aura_token[:30])
             else:
-                _LOGGER.warning("[ReteleElectrice] Aura token nu a fost găsit!")
+                _LOGGER.warning("[ReteleElectrice] Aura token not found")
 
             self._logged_in = True
-            _LOGGER.info("[ReteleElectrice] Login reușit")
+            _LOGGER.info("[ReteleElectrice] Login successful")
             return True
 
         except aiohttp.ClientError as err:
-            _LOGGER.error("[ReteleElectrice] Eroare de rețea la login: %s", err)
+            _LOGGER.error("[ReteleElectrice] Network error during login: %s", err)
             return False
         except Exception as err:
-            _LOGGER.error("[ReteleElectrice] Eroare neașteptată la login: %s", err)
+            _LOGGER.error("[ReteleElectrice] Unexpected error during login: %s", err)
             return False
 
     # ===================================================================
-    # AURA API - Metode de nivel înalt
+    # AURA API - High-level methods
     # ===================================================================
 
     async def async_get_user_name(self) -> Optional[dict]:
-        """Obține numele utilizatorului logat."""
+        """Get logged-in user name."""
         return await self._aura_call(
             descriptor="apex://PED_Utility/ACTION$getUserName",
             calling_descriptor="markup://c:PED_CustomProfileHeader",
         )
 
     async def async_get_account_info(self) -> Optional[dict]:
-        """Obține informațiile contului (nume, adresă, CNP, etc.)."""
+        """Get account info (name, address, CNP, etc.)."""
         return await self._aura_call(
             descriptor="apex://PED_Utility/ACTION$getAccountInfo",
             calling_descriptor="markup://c:PED_CustomProfileHeader",
         )
 
     async def async_get_contact_info(self) -> Optional[dict]:
-        """Obține informațiile de contact."""
+        """Get contact info."""
         return await self._aura_call(
             descriptor="apex://PED_Utility/ACTION$getContactInfo",
             calling_descriptor="markup://c:PED_CustomProfileHeader",
         )
 
     async def async_get_pods(self) -> Optional[list]:
-        """Obține lista tuturor POD-urilor (puncte de consum)."""
+        """Get list of all PODs (consumption points)."""
         return await self._aura_call(
             descriptor="apex://PED_Utility/ACTION$getPODs",
             calling_descriptor="markup://c:PED_HomePage",
         )
 
     async def async_get_pod_details(self, pod_name: str) -> Optional[dict]:
-        """Obține detaliile unui POD specific."""
+        """Get details for a specific POD."""
         return await self._aura_call(
             descriptor="apex://PED_POD_Details_Controller/ACTION$getUserDetailsPodInformation",
             calling_descriptor="markup://c:PED_POD_Details",
@@ -273,7 +268,7 @@ class ReteleElectriceAPI:
         )
 
     async def async_get_pod_reading_details(self, pod_id: str) -> Optional[dict]:
-        """Obține detaliile POD-ului pentru citiri (tip, CUI, CNP)."""
+        """Get POD reading details (type, CUI, CNP)."""
         return await self._aura_call(
             descriptor="apex://PED_ServizidiMisuraController/ACTION$PODDetails",
             calling_descriptor="markup://c:PED_Reading_Archive_Tab",
@@ -281,7 +276,7 @@ class ReteleElectriceAPI:
         )
 
     async def async_get_reading_archive_pod_details(self, pod_id: str) -> Optional[dict]:
-        """Obține detaliile POD-ului via ReadingArchiveController."""
+        """Get POD details via ReadingArchiveController."""
         return await self._aura_call(
             descriptor="apex://PED_ReadingArchiveController/ACTION$PODDetails",
             calling_descriptor="markup://c:PED_Reading_Archive_Tab",
@@ -289,14 +284,14 @@ class ReteleElectriceAPI:
         )
 
     async def async_check_is_client(self) -> Optional[bool]:
-        """Verifică dacă utilizatorul curent este client."""
+        """Check if current user is a client."""
         return await self._aura_call(
             descriptor="apex://PED_Valori_di_Energia_Ctrl/ACTION$checkIsClient",
             calling_descriptor="markup://c:PED_Reading_Archive_Tab",
         )
 
     # ===================================================================
-    # VF A4J Proxy — Reading Archive, Power Outages, Smart Meter
+    # VF A4J Proxy - Reading Archive, Power Outages, Smart Meter
     # ===================================================================
 
     async def async_get_reading_archive(
@@ -307,8 +302,8 @@ class ReteleElectriceAPI:
         cui: str = "",
         cnp: str = "",
     ) -> Optional[dict]:
-        """Obține istoricul citirilor pentru un POD (RetriveSingleSelf)."""
-        # Date default: ultimele 12 luni
+        """Get meter reading archive for a POD (RetriveSingleSelf)."""
+        # Default range: last 12 months
         if not start_date or not end_date:
             now = datetime.now()
             one_year_ago = now - timedelta(days=365)
@@ -317,7 +312,7 @@ class ReteleElectriceAPI:
             if not end_date:
                 end_date = now.strftime("%d/%m/%Y 23:59:59")
 
-        # Obținem CNP/CUI dacă lipsesc
+        # Resolve CNP/CUI if not provided
         if not cnp and not cui:
             pod_details = await self.async_get_pod_reading_details(pod_name)
             if pod_details and isinstance(pod_details, dict):
@@ -330,7 +325,6 @@ class ReteleElectriceAPI:
                     cnp = account.get("CNP__c", "") or account.get("Fiscal_Code__c", "")
                     cui = account.get("Univocal_Code__c", "")
 
-        # Construiește parametrii
         if cnp:
             method_params = ["", "", cnp, pod_name, start_date, end_date]
         elif cui:
@@ -346,7 +340,7 @@ class ReteleElectriceAPI:
     async def async_get_power_outages(
         self, pod_name: str, language: str = "RO"
     ) -> Optional[dict]:
-        """Obține informații despre întreruperile de curent pentru un POD."""
+        """Get power outage info for a POD."""
         method_params = [pod_name, language]
         return await self._call_vf_ws_async(
             method_name="PowerOutages",
@@ -360,13 +354,12 @@ class ReteleElectriceAPI:
         end_date: str = "",
         cnp: str = "",
     ) -> Optional[dict]:
-        """Obține date istorice de la smart meter (FindOutMeterHistoryData).
+        """Get historical smart meter data (FindOutMeterHistoryData).
 
-        Pagina VF: PED_ProxyCallWSAsync_SmartMeter_Vf
-        Parametri: [CNP, "", POD, startDate, endDate]
-        Ambele date: "DD/MM/YYYY 00:00:00"
+        VF Page: PED_ProxyCallWSAsync_SmartMeter_Vf
+        Params: [CNP, "", POD, startDate, endDate]
+        Both dates: "DD/MM/YYYY 00:00:00"
         """
-        # Obținem CNP dacă nu e furnizat
         if not cnp:
             account = await self.async_get_account_info()
             if account and isinstance(account, dict):
@@ -377,9 +370,9 @@ class ReteleElectriceAPI:
                     cnp = pod_details.get("cnp", "")
 
         if not cnp:
-            _LOGGER.warning("[ReteleElectrice] Smart meter: CNP nu a fost găsit!")
+            _LOGGER.warning("[ReteleElectrice] Smart meter: CNP not found")
 
-        # Default: ultimele 90 de zile
+        # Default range: last 90 days
         if not start_date or not end_date:
             now = datetime.now()
             start = now - timedelta(days=90)
@@ -399,7 +392,7 @@ class ReteleElectriceAPI:
         pod_name: str,
         cnp: str = "",
     ) -> Optional[dict]:
-        """Obține date curente de la smart meter (FindOutMeterCurrentData)."""
+        """Get current smart meter data (FindOutMeterCurrentData)."""
         if not cnp:
             account = await self.async_get_account_info()
             if account and isinstance(account, dict):
@@ -415,16 +408,8 @@ class ReteleElectriceAPI:
         self,
         pod_name: str,
     ) -> Optional[dict]:
-        """Obține datele furnizorului și detaliile tehnice ale POD-ului.
-
-        Pagina VF: PED_ProxyCallWSAsync_Curve_VF
-        Metoda: queryPOD
-        Parametri: [POD, "Client_Company"]
-
-        Returnează dict cu furnizor, PRE, CUI, adrese, date contor etc.
-        Cheile *_type_info sunt filtrate automat.
-        """
-        _LOGGER.debug("[ReteleElectrice] queryPOD: date furnizor pentru POD %s", pod_name)
+        """Get supplier data and technical POD details via queryPOD."""
+        _LOGGER.debug("[ReteleElectrice] queryPOD: supplier data for POD %s", pod_name)
 
         result = await self._call_vf_ws_async(
             method_name="queryPOD",
@@ -432,15 +417,14 @@ class ReteleElectriceAPI:
         )
 
         if result is None:
-            _LOGGER.error("[ReteleElectrice] queryPOD: răspuns null")
+            _LOGGER.error("[ReteleElectrice] queryPOD: null response")
             return None
 
-        # Curăță cheile *_type_info (metadate SOAP/Apex)
         return self._clean_type_info(result)
 
     @staticmethod
     def _clean_type_info(data):
-        """Elimină recursiv cheile *_type_info din răspunsul queryPOD."""
+        """Recursively remove *_type_info keys from queryPOD output."""
         if isinstance(data, dict):
             return {
                 k: ReteleElectriceAPI._clean_type_info(v)
@@ -458,21 +442,9 @@ class ReteleElectriceAPI:
         pod_name: str,
         cnp: str = "",
     ) -> Optional[dict]:
-        """Obține valorile instantanee de la smart meter.
-
-        Flux în 2 pași:
-          1. ReqMeterInstantData  — inițiază cererea către backend
-          2. FindOutMeterInstantData — citește datele efective
-
-        Pagina VF: PED_ProxyCallWSAsynSmartMeterIstantData
-        Parametri: [CNP, "", POD]
-
-        Răspuns conține dataIstantValueList cu:
-          - UR/US/UT_VALUE — tensiuni per fază (V)
-          - IR/IS/IT_VALUE — curenți per fază (A)
-          - P_VALUE — putere activă instantanee (kW)
-          - energyReadingList — indexuri: EA, EAP, ER, ERC
-          - READING_DATE, LAST_UPDATED, METER
+        """Get instantaneous smart meter values in two steps:
+        1. ReqMeterInstantData -> triggers backend read
+        2. FindOutMeterInstantData -> fetches reading data
         """
         if not cnp:
             account = await self.async_get_account_info()
@@ -484,41 +456,41 @@ class ReteleElectriceAPI:
                     cnp = pod_details.get("cnp", "")
 
         if not cnp:
-            _LOGGER.warning("[ReteleElectrice] Instant values: CNP nu a fost găsit!")
+            _LOGGER.warning("[ReteleElectrice] Instant values: CNP not found")
 
         method_params = [cnp, "", pod_name]
 
-        # --- Pas 1: ReqMeterInstantData (inițiază cererea) ---
-        _LOGGER.debug("[ReteleElectrice] Instant values PAS 1: ReqMeterInstantData")
+        # --- Step 1: ReqMeterInstantData ---
+        _LOGGER.debug("[ReteleElectrice] Instant values STEP 1: ReqMeterInstantData")
         req_result = await self._call_vf_ws_async(
             method_name="ReqMeterInstantData",
             method_params=method_params,
         )
 
         if req_result is None:
-            _LOGGER.error("[ReteleElectrice] Instant values: ReqMeterInstantData a eșuat")
+            _LOGGER.error("[ReteleElectrice] Instant values: ReqMeterInstantData failed")
             return {"status": "error", "step": "ReqMeterInstantData", "error": "null response"}
 
         if isinstance(req_result, dict):
             result_status = req_result.get("Result", req_result.get("status", ""))
             if result_status == "OK":
                 _LOGGER.debug(
-                    "[ReteleElectrice] Instant values PAS 1: OK — contor: %s",
+                    "[ReteleElectrice] Instant values STEP 1: OK - meter: %s",
                     req_result.get("row", {}).get("METER", "N/A"),
                 )
             elif "error" in str(result_status).lower():
-                _LOGGER.error("[ReteleElectrice] Instant values PAS 1: Eroare: %s", req_result)
+                _LOGGER.error("[ReteleElectrice] Instant values STEP 1: Error: %s", req_result)
                 return req_result
 
-        # --- Pas 2: FindOutMeterInstantData (citește datele) ---
-        _LOGGER.debug("[ReteleElectrice] Instant values PAS 2: FindOutMeterInstantData")
+        # --- Step 2: FindOutMeterInstantData ---
+        _LOGGER.debug("[ReteleElectrice] Instant values STEP 2: FindOutMeterInstantData")
         data_result = await self._call_vf_ws_async(
             method_name="FindOutMeterInstantData",
             method_params=method_params,
         )
 
         if data_result is None:
-            _LOGGER.error("[ReteleElectrice] Instant values: FindOutMeterInstantData a eșuat")
+            _LOGGER.error("[ReteleElectrice] Instant values: FindOutMeterInstantData failed")
             return {"status": "error", "step": "FindOutMeterInstantData", "error": "null response"}
 
         if isinstance(data_result, dict) and "dataIstantValueList" in data_result:
@@ -526,23 +498,23 @@ class ReteleElectriceAPI:
             if instant_list and isinstance(instant_list, list) and len(instant_list) > 0:
                 first = instant_list[0]
                 _LOGGER.debug(
-                    "[ReteleElectrice] Instant values: SUCCESS — P=%s kW, last=%s",
+                    "[ReteleElectrice] Instant values: SUCCESS - P=%s kW, last=%s",
                     first.get("P_VALUE", "N/A"),
                     first.get("LAST_UPDATED", "N/A"),
                 )
         else:
-            _LOGGER.warning("[ReteleElectrice] Instant values: răspuns fără dataIstantValueList")
+            _LOGGER.warning("[ReteleElectrice] Instant values: missing dataIstantValueList")
 
         return data_result
 
     # ===================================================================
-    # Visualforce Web Service Proxy (A4J AJAX Form Submit) — async
+    # Visualforce Web Service Proxy (A4J AJAX Form Submit) - async
     # ===================================================================
 
     async def _call_vf_ws_async(
         self, method_name: str, method_params: list
     ) -> Optional[dict]:
-        """Apelează un web service extern prin Visualforce A4J form submit."""
+        """Call an external web service through Visualforce A4J form submit."""
         vf_page_name = VF_PAGE_MAP.get(method_name)
         if not vf_page_name:
             return {"status": "error", "method": method_name, "error": "Unknown VF page"}
@@ -550,7 +522,7 @@ class ReteleElectriceAPI:
         vf_url = f"{BASE_URL}/{vf_page_name}"
         session = self._get_session()
 
-        # --- Pas 1: GET pagina VF pentru ViewState ---
+        # --- Step 1: GET VF page for ViewState ---
         _LOGGER.debug("[ReteleElectrice] A4J: GET %s", vf_url)
         try:
             async with session.get(
@@ -564,16 +536,16 @@ class ReteleElectriceAPI:
 
         soup = await self._async_soup(html)
 
-        # --- Pas 2: Extrage ViewState ---
+        # --- Step 2: Extract ViewState ---
         viewstate = self._extract_field(soup, "com.salesforce.visualforce.ViewState")
         viewstate_ver = self._extract_field(soup, "com.salesforce.visualforce.ViewStateVersion")
         viewstate_mac = self._extract_field(soup, "com.salesforce.visualforce.ViewStateMAC")
 
         if not viewstate:
-            _LOGGER.error("[ReteleElectrice] A4J: ViewState nu a fost găsit!")
+            _LOGGER.error("[ReteleElectrice] A4J: ViewState not found")
             return {"status": "vf_no_viewstate", "method": method_name}
 
-        # --- Pas 3: Identifică form ID și A4J action ID ---
+        # --- Step 3: Resolve form ID and A4J action ID ---
         form = soup.find("form")
         form_id = form.get("id", "j_id0:j_id2") if form else "j_id0:j_id2"
         form_action = form.get("action", f"/{vf_page_name}") if form else f"/{vf_page_name}"
@@ -596,7 +568,7 @@ class ReteleElectriceAPI:
             else:
                 a4j_action_id = f"{form_id}:j_id3"
 
-        # --- Pas 4: Construiește POST data ---
+        # --- Step 4: Build POST payload ---
         params_string = ",".join(str(p) for p in method_params)
 
         post_data = {
@@ -620,7 +592,7 @@ class ReteleElectriceAPI:
             form_action, method_name, params_string,
         )
 
-        # --- Pas 5: POST ---
+        # --- Step 5: POST A4J request ---
         post_url = f"{BASE_URL}{form_action}" if form_action.startswith("/") else form_action
         try:
             async with session.post(
@@ -648,12 +620,12 @@ class ReteleElectriceAPI:
             "[ReteleElectrice] A4J: Response len=%d", len(response_text)
         )
 
-        # --- Pas 6: Parsează A4J response ---
+        # --- Step 6: Parse A4J response in executor ---
         result = await self._hass.async_add_executor_job(
             self._parse_a4j_response, response_text, method_name
         )
         if result is not None:
-            _LOGGER.debug("[ReteleElectrice] A4J: SUCCESS — date obținute pentru %s", method_name)
+            _LOGGER.debug("[ReteleElectrice] A4J: SUCCESS for %s", method_name)
             return result
 
         return {
@@ -663,7 +635,7 @@ class ReteleElectriceAPI:
         }
 
     # ===================================================================
-    # AURA API - Nivel scăzut (async)
+    # AURA API - Low-level call
     # ===================================================================
 
     async def _aura_call(
@@ -674,9 +646,9 @@ class ReteleElectriceAPI:
         version: str = None,
         storable: bool = False,
     ) -> Optional[Any]:
-        """Execută un Aura action call (async)."""
+        """Execute an Aura action call asynchronously."""
         if not self._aura_token:
-            _LOGGER.error("[ReteleElectrice] Aura token lipsă. Fă login mai întâi.")
+            _LOGGER.error("[ReteleElectrice] Missing Aura token; log in first")
             return None
 
         session = self._get_session()
@@ -740,7 +712,7 @@ class ReteleElectriceAPI:
                 except Exception:
                     text = await resp.text()
                     _LOGGER.error(
-                        "[ReteleElectrice] Aura call: răspuns non-JSON (%s)",
+                        "[ReteleElectrice] Aura call non-JSON response (%s)",
                         text[:200],
                     )
                     return None
@@ -771,8 +743,8 @@ class ReteleElectriceAPI:
     # ===================================================================
 
     def _parse_a4j_response(self, response_text: str, method_name: str) -> Optional[Any]:
-        """Parsează răspunsul A4J (partial page update) pentru a extrage datele WS."""
-        # Metoda 1: Caută JSON direct în response
+        """Parse an A4J partial page response to extract web service data."""
+        # Method 1: Match JSON payloads directly in response text
         json_patterns = [
             re.compile(r'\[(\{[^{]*?"sampleDate"[^]]*?\})\]'),
             re.compile(r'\[(\{[^{]*?"energyType"[^]]*?\})\]'),
@@ -790,7 +762,7 @@ class ReteleElectriceAPI:
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-        # Metoda 2: Caută în CDATA sections
+        # Method 2: Inspect CDATA blocks
         cdata_matches = re.findall(r'<!\[CDATA\[(.*?)\]\]>', response_text, re.DOTALL)
         for cdata in cdata_matches:
             try:
@@ -807,7 +779,7 @@ class ReteleElectriceAPI:
                 except (json.JSONDecodeError, ValueError):
                     pass
 
-        # Metoda 3: Caută result în span/div actualizat
+        # Method 3: Look for result text inside updated elements
         soup = BeautifulSoup(response_text, "html.parser")
         result_span = soup.find(id=re.compile(r"result", re.I))
         if result_span:
@@ -820,7 +792,7 @@ class ReteleElectriceAPI:
                     if len(text) > 10:
                         return {"raw_result": text}
 
-        # Metoda 4: Caută postMessage în script-uri
+        # Method 4: Extract JSON object passed to postMessage
         pm_match = re.search(
             r'parent\.postMessage\s*\(\s*(\{[^}]+\})',
             response_text,
@@ -832,7 +804,7 @@ class ReteleElectriceAPI:
             except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Metoda 5: Extrage valori din input-uri actualizate
+        # Method 5: Fallback to non-ViewState form input values
         inputs = soup.find_all("input")
         input_data = {}
         for inp in inputs:
@@ -856,19 +828,18 @@ class ReteleElectriceAPI:
     # ===================================================================
 
     async def _async_soup(self, html: str) -> BeautifulSoup:
-        """Parsează HTML în executor — paginile Salesforce sunt mari, iar parsarea
-        în event loop bloca Home Assistant la fiecare actualizare."""
+        """Parse HTML in executor so large Salesforce pages do not block the event loop."""
         return await self._hass.async_add_executor_job(BeautifulSoup, html, "html.parser")
 
     def _extract_aura_token_from_cookies(self) -> Optional[str]:
-        """Extrage aura token din cookie-ul __Host-ERIC_PROD*."""
+        """Extract Aura token from __Host-ERIC_PROD* cookie."""
         for cookie in self._cookie_jar:
             if cookie.key.startswith("__Host-ERIC_PROD"):
                 return cookie.value
         return None
 
     def _extract_aura_token_from_html(self, html: str) -> Optional[str]:
-        """Fallback: extrage aura token din HTML/JS."""
+        """Fallback: extract Aura token from HTML/JS."""
         jwt_match = re.search(r'jwt=(eyJ[A-Za-z0-9_-]+\.\.[A-Za-z0-9_-]+)', html)
         if jwt_match:
             return jwt_match.group(1)
@@ -884,7 +855,7 @@ class ReteleElectriceAPI:
 
     @staticmethod
     def _extract_field(soup: BeautifulSoup, field_name: str) -> Optional[str]:
-        """Extrage o valoare dintr-un câmp input ascuns."""
+        """Extract value from a hidden input field."""
         inp = soup.find("input", {"name": field_name})
         if inp:
             return inp.get("value", "")
@@ -898,7 +869,7 @@ class ReteleElectriceAPI:
 
     @staticmethod
     def _find_input_name(soup: BeautifulSoup, candidates: list) -> str:
-        """Găsește un câmp input după candidați."""
+        """Find an input field name matching candidate patterns."""
         for candidate in candidates:
             inp = soup.find("input", {"name": re.compile(candidate, re.I)})
             if inp:
@@ -910,7 +881,7 @@ class ReteleElectriceAPI:
 
     @staticmethod
     def _find_submit_name(soup: BeautifulSoup) -> str:
-        """Găsește câmpul submit al formularului."""
+        """Find the form submit input name."""
         submit = soup.find("input", {"type": "submit"})
         if submit and submit.get("name"):
             return submit.get("name")
